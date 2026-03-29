@@ -1,13 +1,13 @@
 name: Klise Bot Run
 on:
   schedule:
-    - cron: '*/30 * * * *'  # Spustí se samo každých 30 minut
-  workflow_dispatch:        # Umožní ti to spustit ručně tlačítkem v záložce Actions
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:            # Tohle je pojistka pro ten zápis (exit code 128)
+    permissions:
       contents: write
     steps:
       - name: Checkout code
@@ -17,8 +17,7 @@ jobs:
         with:
           python-version: '3.9'
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4
+        run: pip install requests beautifulsoup4
       - name: Run bot
         env:
           TG_TOKEN: ${{ secrets.TG_TOKEN }}
@@ -28,6 +27,6 @@ jobs:
         run: |
           git config --global user.name 'GitHub Action'
           git config --global user.email 'action@github.com'
-          git add seen_ids.txt || echo "No file to add"
+          git add seen_ids.txt || echo "No changes"
           git commit -m "Update seen IDs" || exit 0
           git push
