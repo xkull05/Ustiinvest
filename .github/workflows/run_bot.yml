@@ -1,0 +1,30 @@
+name: Klise Bot Run
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Každých 30 minut
+  workflow_dispatch:        # Umožní spustit ručně tlačítkem
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      - name: Install dependencies
+        run: pip install requests
+      - name: Run bot
+        env:
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: python bot.py
+      - name: Save seen IDs
+        run: |
+          git config --global user.name 'GitHub Action'
+          git config --global user.email 'action@github.com'
+          git add seen_ids.txt
+          git commit -m "Update seen IDs" || exit 0
+          git push
