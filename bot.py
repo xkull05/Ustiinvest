@@ -2,92 +2,50 @@ import requests
 import os
 from bs4 import BeautifulSoup
 
-# Načtení klíčů z trezoru GitHubu
 TELEGRAM_TOKEN = os.getenv("TG_TOKEN")
 CHAT_ID = os.getenv("TG_CHAT_ID")
 
-# Konfigurace - FILTRY (Ústí - Klíše, do 3.2M)
-SREALITY_URL = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_type_cb=1&locality_district_id=88&locality_region_id=10&price_czk_max=3200000&per_page=40"
-BAZOS_URL = "https://reality.bazos.cz/hledat/klise/?hledat=klise&rubriky=reality&hlokalita=40001&humkreis=0&cenaod=&cenado=3200000&order=1"
+# Sreality API - hledáme byty 1+kk, 1+1, 2+kk, 2+1 v Ústí nad Labem
+URL = "https://www.sreality.cz/api/cs/v2/estates?category_main_cb=1&category_sub_cb=2|3|4|5|6|7&category_type_cb=1&locality_district_id=88&locality_region_id=10&price_czk_max=3300000&per_page=50"
 
 def send_tg(msg):
-    """Odeslání zprávy na Telegram"""
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML", "disable_web_page_preview": False}
-    try:
-        requests.post(url, data=payload, timeout=10)
-    except:
-        pass
+    payload = {"chat_id": CHAT_ID, "text": msg, "parse_mode": "HTML"}
+    requests.post(url, data=payload, timeout=10)
 
 def check_sreality(seen_ids):
-    """Kontrola Srealit s brutálním filtrem"""
-    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
-        response = requests.get(SREALITY_URL, headers=headers, timeout=15)
-        data = response.json()
-        
-        for estate in data.get('_embedded', {}).get('estates', []):
-            est_id = str(estate['hash_id'])
-            locality = estate.get('locality', '').lower()
-            name = estate.get('name', '').lower()
+        res = requests.get(URL, headers=headers, timeout=15).json()
+        for est in res.get('_embedded', {}).get('estates', []):
+            est_id = str(est['hash_id'])
+            loc = est.get('locality', '').lower()
+            name = est.get('name', '').lower()
             
-            # 1. FILTR LOKALITY: Musí to být Ústí a musí tam být slovo Klíše
-            if "ústí nad labem" not in locality or "klíše" not in locality:
+            # FILTR 1: Musí to být Klíše (vyhodí zbytek Ústí)
+            if "klíše" not in loc:
                 continue
             
-            # 2. FILTR VELIKOSTI: Vyhodíme všechno co smrdí velkým bytem nebo domem
-            # Chceme jen 1+kk, 1+1, 2+kk, 2+1
-            zakazane = ["3+", "4+", "5+", "atyp", "domu", "vily", "pozemek", "zahrada"]
-            if any(x in name for x in zakazane):
+            # FILTR 2: Stopka pro velké byty a domy (Sreality to občas podstrčí)
+            stop_slova = ["3+", "4+", "5+", "atyp", "domu", "vily", "chata", "chalupa"]
+            if any(s in name for s in stop_slova):
                 continue
 
             if est_id not in seen_ids:
-                price = estate['price_czk']['value_raw']
-                title = estate['name']
-                link = f"https://www.sreality.cz/detail/prodej/byt/x/x/{est_id}"
+                price = est['price_czk']['value_raw']
+                title = est['name']
+                # OPRAVENÝ ODKAZ: Tento formát Sreality sežerou vždy
+                link = f"https://www.sreality.cz/detail/prodej/byt/2+kk/usti-nad-labem-klise-klisska/{est_id}"
                 
-                msg = f"<b>🏠 SREALITY: KLÍŠE (1-2kk)</b>\n{title}\n💰 Cena: {price:,} Kč\n\n🔗 <a href='{link}'>Detail inzerátu zde</a>".replace(',', ' ')
+                msg = f"<b>🏠 NOVINKA KLÍŠE:</b>\n{title}\n💰 Cena: {price:,} Kč\n\n🔗 <a href='{link}'>Zobrazit inzerát</a>".replace(',', ' ')
                 send_tg(msg)
                 seen_ids.add(est_id)
-    except:
-        pass
-
-def check_bazos(seen_ids):
-    """Kontrola Bazoše se zaměřením na klíčová slova"""
-    headers = {'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15'}
-    try:
-        response = requests.get(BAZOS_URL, headers=headers, timeout=15)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        for div in soup.find_all('div', class_='vypis'):
-            link_tag = div.find('a')
-            if not link_tag: continue
-            
-            link = "https://reality.bazos.cz" + link_tag['href']
-            est_id = "bazos_" + link.split('/')[-2]
-            title = div.find('h2').text.lower()
-            
-            # Bazoš filtr: Musí tam být "klíš" a nesmí tam být velký byt
-            if ("klíš" in title or "klis" in title) and not any(x in title for x in ["3+", "4+", "5+"]):
-                if est_id not in seen_ids:
-                    price = div.find('div', class_='cena').text
-                    msg = f"<b>💰 BAZOŠ: PŘÍMÝ PRODEJ?</b>\n{title.upper()}\n💵 Cena: {price}\n\n🔗 <a href='{link}'>Otevřít Bazoš</a>"
-                    send_tg(msg)
-                    seen_ids.add(est_id)
-    except:
-        pass
+    except Exception as e:
+        print(f"Chyba: {e}")
 
 if __name__ == "__main__":
-    seen_file = "seen_ids.txt"
-    if os.path.exists(seen_file):
-        with open(seen_file, "r") as f:
-            seen_ids = set(f.read().splitlines())
-    else:
-        seen_ids = set()
-
-    check_sreality(seen_ids)
-    check_bazos(seen_ids)
-
-    # Uložíme jen posledních 100 inzerátů, ať je soubor malý
-    with open(seen_file, "w") as f:
-        f.write("\n".join(list(seen_ids)[-100:]))
+    file = "seen_ids.txt"
+    seen = set(open(file).read().splitlines()) if os.path.exists(file) else set()
+    check_sreality(seen)
+    with open(file, "w") as f:
+        f.write("\n".join(list(seen)[-100:]))
